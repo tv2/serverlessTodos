@@ -6,6 +6,7 @@ provider:
   name: aws
   runtime: nodejs4.3
   region: eu-central-1
+  role: arn:aws:iam::930112767020:role/code-pipeline-TestBuild-service-role
   cfnRole: arn:aws:iam::930112767020:role/code-pipeline-TestBuild-service-role
   environment:
       TABLE_NAME: todos-${opt:stage, self:provider.stage}
