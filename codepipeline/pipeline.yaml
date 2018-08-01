@@ -1,0 +1,154 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Pipeline
+Parameters:
+  RepositoryOwner:
+    Type: String
+    Default: tv2
+    Description: "Owner of the Github repository"
+  RepositoryName:
+    Type: String
+    Default: serverlessTodos
+    Description: "Name of the project in Github"
+  BranchName:
+    Type: String
+    Default: master
+    Description: "Branch of the project"
+  DeploymentName:
+    Type: String
+    Description: "Name of the deployment project"
+  GitHubToken:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Default: 'serverless-github-token'
+    Description: "Name of the SSM parameter key name that stores the Github token"
+  DeploymentRegion:
+    Type: String
+    Default: "eu-central-1"
+    Description: "The region to deploy the project"
+Resources:
+  CodePipelineServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub cp-servicerole-${DeploymentName}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AdministratorAccess'
+  CodeBuildServiceRole:
+      Type: 'AWS::IAM::Role'
+      Properties:
+        RoleName: !Sub cb-servicerole-${DeploymentName}
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - codebuild.amazonaws.com
+              Action:
+                - 'sts:AssumeRole'
+        ManagedPolicyArns:
+          - 'arn:aws:iam::aws:policy/AdministratorAccess'
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+  CodeBuildProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Name: !Ref DeploymentName
+      ServiceRole: !Ref CodeBuildServiceRole
+      Artifacts:
+        Location: !Ref ArtifactBucket
+        Type: "S3"
+      Source:
+        Location: !Sub ${ArtifactBucket}/source.zip
+        Type: "GITHUB"
+      Environment:
+        ComputeType: "BUILD_GENERAL1_SMALL"
+        Image: "aws/codebuild/nodejs:8.11.0"
+        Type: "LINUX_CONTAINER"
+        EnvironmentVariables:
+          - Name: AWS_REGION
+            Value: !Ref DeploymentRegion
+          - Name: GITHUB_TOKEN
+            Value: !Ref GitHubToken
+  Pipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      Name: !Ref 'AWS::StackName'
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: CheckoutSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              Configuration:
+                Owner: !Ref RepositoryOwner
+                Repo: !Ref RepositoryName
+                PollForSourceChanges: false
+                Branch: !Ref BranchName
+                OAuthToken: !Ref GitHubToken
+              OutputArtifacts:
+                - Name: SourceOutput
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: BuildAndTest
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 2
+Outputs:
+  PipelineUrl:
+    Value: !Sub https://console.aws.amazon.com/codepipeline/home?region=${AWS::Region}#/view/${Pipeline}
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Github Repository"
+        Parameters:
+          - RepositoryOwner
+          - RepositoryName
+          - BranchName
+          - GitHubToken
+    ParameterGroups:
+      - Label:
+          default: "Deployment"
+        Parameters:
+          - DeploymentName
+          - DeploymentRegion
+    ParameterLabels:
+      RepositoryOwner:
+        default: "Owner"
+      RepositoryName:
+        default: "Repository Name"
+      BranchName:
+        default: "Branch"
+      GitHubToken:
+        default: "Key Name"
+      DeploymentName:
+        default: "Name of Deployment"
+      DeploymentRegion:
+        default: "Region to Deploy"
